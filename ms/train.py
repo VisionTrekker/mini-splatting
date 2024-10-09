@@ -52,7 +52,7 @@ def init_cdf_mask(importance, thres=1.0):
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, args):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-
+    # 创建高斯模型，球谐阶数固定为0
     gaussians = GaussianModel(sh_degree=0)
 
     scene = Scene(dataset, gaussians)
@@ -72,6 +72,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
 
+    # 初始化为0，用于分裂模糊区域的高斯
     mask_blur = torch.zeros(gaussians._xyz.shape[0], device='cuda')
     
     for iteration in range(first_iter, opt.iterations + 1):        
@@ -92,14 +93,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         iter_start.record()
 
-        simp_iteration1=args.simp_iteration1 
-        if iteration<simp_iteration1:
+        simp_iteration1=args.simp_iteration1    # 剪枝第一个迭代次数
+        if iteration < simp_iteration1:
             gaussians.update_learning_rate(iteration)
         else:
             gaussians.update_learning_rate(iteration-simp_iteration1+5000)
 
 
-        if iteration % 1000 == 0 and iteration>simp_iteration1:
+        if iteration % 1000 == 0 and iteration > simp_iteration1:
+            # 15K后，每1000代增加球谐阶数
             gaussians.oneupSHdegree()
 
 
@@ -112,6 +114,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if (iteration - 1) == debug_from:
             pipe.debug = True
 
+        # 调用自写的光栅器
         render_pkg = render_imp(viewpoint_cam, gaussians, pipe, background)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
@@ -139,31 +142,32 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
 
-
-
             # Densification
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
+                # 渲染的当前图像下对每个像素贡献度最高的 高斯的ID
                 area_max = render_pkg["area_max"]
+                # 累或 mask_blur。
                 mask_blur = torch.logical_or(mask_blur, area_max>(image.shape[1]*image.shape[2]/5000))
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and iteration % 5000!=0 and gaussians._xyz.shape[0]<args.num_max:  
-                
+                    # 500 ~ 15K，每100代 且 不是每5000代 且 高斯的个数 < 40000
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
 
-
+                    # 增稠和剪枝
                     gaussians.densify_and_prune_split(opt.densify_grad_threshold, 
                                                     0.005, scene.cameras_extent, 
                                                     size_threshold, mask_blur)
+                    # 重置mask_blur
                     mask_blur = torch.zeros(gaussians._xyz.shape[0], device='cuda')
                     
                     
-                if iteration%5000==0:
+                if iteration % 5000==0:
+                    # 0 ~ 15K，每5000代，使用深度重新初始化高斯
 
-                    
                     out_pts_list=[]
                     gt_list=[]
                     views=scene.getTrainCameras()
@@ -209,6 +213,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
 
             if iteration == simp_iteration1:
+                # 第15K，第一次剪枝
 
                 imp_score = torch.zeros(gaussians._xyz.shape[0]).cuda()
                 accum_area_max = torch.zeros(gaussians._xyz.shape[0]).cuda()
@@ -257,6 +262,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
 
             if iteration == args.simp_iteration2:
+                # 第15K，第二次剪枝
 
                 imp_score = torch.zeros(gaussians._xyz.shape[0]).cuda()
                 accum_area_max = torch.zeros(gaussians._xyz.shape[0]).cuda()
@@ -284,8 +290,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 gaussians.prune_points(non_prune_mask==False)
                 gaussians.training_setup(opt)
                 torch.cuda.empty_cache()   
-
-                
+            # 增稠结束
 
             # Optimizer step
             if iteration < opt.iterations:
@@ -400,13 +405,13 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
 
-    parser.add_argument("--simp_iteration1", type=int, default = 15_000)
-    parser.add_argument("--simp_iteration2", type=int, default = 20_000)
+    parser.add_argument("--simp_iteration1", type=int, default = 15_000)    # 第一次剪枝的迭代次数
+    parser.add_argument("--simp_iteration2", type=int, default = 20_000)    # 第二次剪枝的迭代次数
     parser.add_argument("--num_depth", type=int, default = 3_500_000)
-    parser.add_argument("--num_max", type=int, default = 4_500_000)
+    parser.add_argument("--num_max", type=int, default = 4_500_000)     # 增稠和剪枝的最大高斯个数
     parser.add_argument("--sampling_factor", type=float, default = 0.5)
 
-    parser.add_argument("--imp_metric", required=True, type=str, default = None)
+    parser.add_argument("--imp_metric", required=True, type=str, default = None)    # 根据室内还是室外选择重要性评价指标，indoor: I1; outdoor: I2
 
 
 
