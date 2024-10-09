@@ -131,7 +131,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+                progress_bar.set_postfix({
+                    "Loss": f"{ema_loss_for_log:.{7}f}",
+                    "Points": f"{len(gaussians.get_xyz)}"
+                     })
                 progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()

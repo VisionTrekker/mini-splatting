@@ -13,6 +13,7 @@ from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
+import sys
 
 WARNED = False
 
@@ -55,7 +56,12 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []
 
     for id, c in enumerate(cam_infos):
+        sys.stdout.write('\r')
+        sys.stdout.write("\tReading camera {}/{}".format(id + 1, len(cam_infos)))
+        sys.stdout.flush()
+
         camera_list.append(loadCam(args, id, c, resolution_scale))
+    sys.stdout.write('\n')
 
     return camera_list
 
