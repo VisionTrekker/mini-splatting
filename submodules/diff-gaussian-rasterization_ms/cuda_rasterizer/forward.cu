@@ -426,12 +426,12 @@ render_depthCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 
-	float* __restrict__ out_color,
-	float* __restrict__ out_pts,
-	float* __restrict__ out_depth,
-	float* accum_alpha,
-	int* __restrict__ gidx,
-	float* __restrict__ discriminants,
+	float* __restrict__ out_color,  // 输出的 渲染的RGB图像
+	float* __restrict__ out_pts,    // 输出的
+	float* __restrict__ out_depth,  // 输出的
+	float* accum_alpha,         // 输出的
+	int* __restrict__ gidx,     // 输出的
+	float* __restrict__ discriminants,      // 输出的
 
 	const float* __restrict__ means3D,
 	const glm::vec3* __restrict__ scales,
@@ -481,24 +481,24 @@ render_depthCUDA(
 	int idx_max=0;
 	int flag_update=0;
 
-    glm::mat4 matrix = glm::make_mat4x4(projmatrix);
+    glm::mat4 matrix = glm::make_mat4x4(projmatrix);    // 观测变换矩阵 * 投影变换矩阵，W2NDC = W2C * C2NDC
     glm::mat4 matrix_temp = glm::inverse(matrix);
-	float *projmatrix_inv= glm::value_ptr(matrix_temp);
+	float *projmatrix_inv= glm::value_ptr(matrix_temp); // NDC2W
 
-	glm::vec3 ray_origin = *cam_pos;
+	glm::vec3 ray_origin = *cam_pos;    // 当前相机中心的世界坐标
 	glm::vec3 point_rec = {0,0,0};
 
 
 
 
-
+    // 将当前处理的 像素 在像素平面的坐标 转换到 NDC空间
 	float3 p_proj_r = { Pix2ndc(pixf.x, W), Pix2ndc(pixf.y, H), 1};
 
 	//inverse process of 'Transform point by projecting'
-	float p_hom_x_r = p_proj_r.x*(1.0000001);
-	float p_hom_y_r = p_proj_r.y*(1.0000001);
+	float p_hom_x_r = p_proj_r.x * (1.0000001);
+	float p_hom_y_r = p_proj_r.y * (1.0000001);
 	// self.zfar = 100.0, self.znear = 0.01
-	float p_hom_z_r = (100+0.01-1)/(100-0.01);
+	float p_hom_z_r = (100 + 0.01 - 1) / (100 - 0.01);
 	float p_hom_w_r = 1;
 
 

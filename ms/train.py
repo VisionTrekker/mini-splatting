@@ -152,15 +152,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
                 # 渲染的当前图像下对每个像素贡献度最高的 高斯的ID
-                area_max = render_pkg["area_max"]
+                area_max = render_pkg["area_max"]   # (N,)
                 # 累或 mask_blur。
-                mask_blur = torch.logical_or(mask_blur, area_max>(image.shape[1]*image.shape[2]/5000))
+                mask_blur = torch.logical_or(mask_blur, area_max > (image.shape[1] * image.shape[2] / 5000))
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and iteration % 5000!=0 and gaussians._xyz.shape[0]<args.num_max:  
-                    # 500 ~ 15K，每100代 且 不是每5000代 且 高斯的个数 < 40000
+                    # 500 ~ 15K，每100代 且 不是每5000代 且 高斯的个数 < num_max，则增稠和剪枝
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
 
-                    # 增稠和剪枝
+                    # 增稠(考虑blur_mask)和剪枝
                     gaussians.densify_and_prune_split(opt.densify_grad_threshold, 
                                                     0.005, scene.cameras_extent, 
                                                     size_threshold, mask_blur)
@@ -168,51 +168,52 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     mask_blur = torch.zeros(gaussians._xyz.shape[0], device='cuda')
                     
                     
-                if iteration % 5000==0:
+                if iteration % 1000==0:
                     # 0 ~ 15K，每5000代，使用深度重新初始化高斯
 
-                    out_pts_list=[]
-                    gt_list=[]
+                    out_pts_list=[] # 存储 采样后的3D点
+                    gt_list=[]  # 存储 采样后3D点的RGB
                     views=scene.getTrainCameras()
+                    # 遍历所有训练相机
                     for view in views:
                         gt = view.original_image[0:3, :, :]
                         render_depth_pkg = render_depth(view, gaussians, pipe, background)
-                        out_pts = render_depth_pkg["out_pts"]
-                        accum_alpha = render_depth_pkg["accum_alpha"]
+                        out_pts = render_depth_pkg["out_pts"]   # 当前训练相机的 3D点，(3,H,W)
+                        accum_alpha = render_depth_pkg["accum_alpha"]   # 当前相机 累积的α值，每个像素一个值，(1,H,W)
 
+                        # 计算高斯被采样的概率
+                        prob = 1 - accum_alpha  # 1 - 不透明度 ==> 透明度，不透明度越高，采样概率越低
 
-                        prob=1-accum_alpha
+                        prob = prob/prob.sum()  # 归一化
+                        prob = prob.reshape(-1).cpu().numpy()   # (H*W,)
 
-                        prob = prob/prob.sum()
-                        prob = prob.reshape(-1).cpu().numpy()
+                        # 每张深度图保留点云个数的比例因子 = num_depth / N_view / (H * W)
+                        factor = 1 / (image.shape[1] * image.shape[2] * len(views) / args.num_depth)
 
+                        N_xyz = prob.shape[0]   # 当前相机 深度点的个数，(H*W,)
+                        num_sampled = int(N_xyz * factor)   # 当前相机 保留点的个数（均分） = 设定的要保留点的总数 / 相机个数
 
-                        factor=1/(image.shape[1]*image.shape[2]*len(views)/args.num_depth)
-
-
-                        N_xyz=prob.shape[0]
-                        num_sampled=int(N_xyz*factor)
-
-                        indices = np.random.choice(N_xyz, size=num_sampled, 
-                                                   p=prob,replace=False)
+                        indices = np.random.choice(N_xyz, size=num_sampled, p=prob,replace=False)
                         
-                        out_pts = out_pts.permute(1,2,0).reshape(-1,3)
-                        gt = gt.permute(1,2,0).reshape(-1,3)
+                        out_pts = out_pts.permute(1,2,0).reshape(-1,3)  # (H*W,3)
+                        gt = gt.permute(1,2,0).reshape(-1,3)    # (H*W,3)
 
                         out_pts_list.append(out_pts[indices])
-                        gt_list.append(gt[indices])       
-
-    
+                        gt_list.append(gt[indices])
 
                     out_pts_merged=torch.cat(out_pts_list)
                     gt_merged=torch.cat(gt_list)
 
+                    # 使用深度点重新初始化高斯
                     gaussians.reinitial_pts(out_pts_merged, gt_merged)
                     gaussians.training_setup(opt)
-                    mask_blur = torch.zeros(gaussians._xyz.shape[0], device='cuda')
-                    torch.cuda.empty_cache()
-                    viewpoint_stack = scene.getTrainCameras().copy()
 
+                    # 重置 blur mask
+                    mask_blur = torch.zeros(gaussians._xyz.shape[0], device='cuda')
+
+                    torch.cuda.empty_cache()
+
+                    viewpoint_stack = scene.getTrainCameras().copy()
 
 
             if iteration == simp_iteration1:
@@ -377,6 +378,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                 lpipss_test=torch.tensor(lpipss).mean()
 
                 print("\n[ITER {}] Evaluating {}: ".format(iteration, config['name']))
+                print("  L1 : {:>12.7f}".format(l1_test.mean(), ".5"))
                 print("  SSIM : {:>12.7f}".format(ssims_test.mean(), ".5"))
                 print("  PSNR : {:>12.7f}".format(psnr_test.mean(), ".5"))
                 print("  LPIPS : {:>12.7f}".format(lpipss_test.mean(), ".5"))

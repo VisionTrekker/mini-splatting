@@ -412,7 +412,6 @@ class GaussianModel:
     def densify_and_prune_split(self, max_grad, min_opacity, extent, max_screen_size, mask):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
-
         self.densify_and_clone(grads, max_grad, extent)
         self.densify_and_split_mask(grads, max_grad, extent, mask)
 
@@ -427,23 +426,32 @@ class GaussianModel:
 
 
     def densify_and_split_mask(self, grads, grad_threshold, scene_extent, mask, N=2):
-        n_init_points = self.get_xyz.shape[0]
-        # Extract points that satisfy the gradient condition
+        """
+            mask：blur_mask，当前图像下对每个像素贡献度最高的 高斯的ID > (H*W) / 5000，(N,)
+        """
+        n_init_points = self.get_xyz.shape[0]   # 克隆后高斯的个数
+
+        # 克隆后所有高斯的 梯度。前一部分：旧高斯的原梯度；后一部分：克隆的新高斯的梯度（0 tensor）
         padded_grad = torch.zeros((n_init_points), device="cuda")
         padded_grad[:grads.shape[0]] = grads.squeeze()
+
+        # 标记出满足（(条件1 && 条件2) || blur_mask）的大3D高斯 分裂成 两个小3D高斯
+        # 条件1：累加梯度 >= 阈值（旧高斯中）
         selected_pts_mask = torch.where(padded_grad >= grad_threshold, True, False)
+        # 条件2：最大缩放因子（最长轴） > （控制密度的百分比，0.01）*（所有train相机包围圈的半径 * 1.1）
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values > self.percent_dense*scene_extent)
-
+        # 克隆后所有高斯的 blur_mask，意为要分裂。前一部分：旧高斯的mask；后一部分：克隆的新高斯的mask（0）
         padded_mask = torch.zeros((n_init_points), dtype=torch.bool, device='cuda')
         padded_mask[:grads.shape[0]] = mask
+        # 条件3：模糊区域对应的大高斯
         selected_pts_mask = torch.logical_or(selected_pts_mask, padded_mask)
-        
 
         stds = self.get_scaling[selected_pts_mask].repeat(N,1)
         means = torch.zeros((stds.size(0), 3),device="cuda")
         samples = torch.normal(mean=means, std=stds)
         rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N,1,1)
+
         new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask].repeat(N, 1)
         new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N,1) / (0.8*N))
         new_rotation = self._rotation[selected_pts_mask].repeat(N,1)
@@ -458,14 +466,18 @@ class GaussianModel:
 
 
     def reinitial_pts(self, pts, rgb):
-
+        """
+        使用深度点重新初始化高斯
+            pts：采样后的3D点，tensor
+            rgb：采样后3D点的RGB
+        """
         fused_point_cloud = pts
         fused_color = RGB2SH(rgb)
         features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
         features[:, :3, 0 ] = fused_color
         features[:, 3:, 1:] = 0.0
 
-        # print("Number of points at initialisation : ", fused_point_cloud.shape[0])
+        print("Number of points at Re-initialisation : ", fused_point_cloud.shape[0])
 
         dist2 = torch.clamp_min(distCUDA2(fused_point_cloud), 0.0000001)
         scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)

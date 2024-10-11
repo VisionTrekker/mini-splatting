@@ -165,12 +165,12 @@ class _RasterizeGaussians(torch.autograd.Function):
         # Invoke C++/CUDA rasterizer
         num_rendered, color, out_pts, depth, accum_alpha, gidx, discriminants, radii, geomBuffer, binningBuffer, imgBuffer = _C.rasterize_gaussians_depth(*args)
 
-        res =  {"render": color,
-                "out_pts": out_pts,
-                "rendered_depth": depth,
+        res =  {"render": color,    # 渲染的RGB图
+                "out_pts": out_pts, # 渲染的深度图 对应的 世界坐标的点云
+                "rendered_depth": depth,    # 渲染的深度图
                 "discriminants": discriminants,
                 "gidx": gidx,
-                "accum_alpha": accum_alpha,
+                "accum_alpha": accum_alpha, # 累积的阿尔法权重
                 }
 
         return res
