@@ -617,7 +617,7 @@ render_depthCUDA(
             // 找到对当前像素贡献度最大的高斯，记录其：权重值、深度、判别式、ID
 			if(weight_max < alpha * T)
 			{
-				weight_max = alpha * T;     // 高斯的 权重 = 不透明度 * 透射率：对光线的吸收程度 * 光线经过之前的高斯后 剩余的能量
+				weight_max = alpha * T;     // 当前高斯的 权重 = 当前高斯的不透明度 * 经之前高斯累积的透射率 = 当前高斯对光线的吸收程度 * 光线经过之前的高斯后 剩余的能量
 				depth_max = depth;
 				discriminant_max = discriminant;
 				idx_max = collected_id[j];
