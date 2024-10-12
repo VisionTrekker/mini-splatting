@@ -177,21 +177,28 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     # 遍历所有训练相机
                     for view in views:
                         gt = view.original_image[0:3, :, :]
+                        # 调用render_depth渲染器（无反向传播），返回：
+                        # render:     输出的 RGB图
+                        # out_pts:    输出的 3D点（射线 与 最大贡献度高斯的 交点中点）的 世界坐标
+                        # rendered_depth: 输出的 深度图（射线 与 最大贡献度高斯交点中点的 距离）
+                        # discriminants:  输出的 每个像素光线 与 最大贡献度高斯 是否有交点的判定值
+                        # gidx:       输出的 对每个像素 贡献度最大的高斯的ID
+                        # accum_alpha:    输出的 累积的透射率
                         render_depth_pkg = render_depth(view, gaussians, pipe, background)
                         out_pts = render_depth_pkg["out_pts"]   # 当前训练相机的 3D点，(3,H,W)
-                        accum_alpha = render_depth_pkg["accum_alpha"]   # 当前相机 累积的α值，每个像素一个值，(1,H,W)
+                        accum_alpha = render_depth_pkg["accum_alpha"]   # 当前相机 累积的透射率，每个像素一个值，(1,H,W)，透射率越低，表明经过的高斯吸收光线的程度越高
 
-                        # 计算高斯被采样的概率
-                        prob = 1 - accum_alpha  # 1 - 不透明度 ==> 透明度，不透明度越高，采样概率越低
+                        # 计算深度点被采样的概率
+                        prob = 1 - accum_alpha  # 累积的不透明度，越高，表明高斯吸收光线的程度越高，采样概率越高
 
-                        prob = prob/prob.sum()  # 归一化
+                        prob = prob / prob.sum()  # 归一化
                         prob = prob.reshape(-1).cpu().numpy()   # (H*W,)
 
                         # 每张深度图保留点云个数的比例因子 = num_depth / N_view / (H * W)
                         factor = 1 / (image.shape[1] * image.shape[2] * len(views) / args.num_depth)
 
-                        N_xyz = prob.shape[0]   # 当前相机 深度点的个数，(H*W,)
-                        num_sampled = int(N_xyz * factor)   # 当前相机 保留点的个数（均分） = 设定的要保留点的总数 / 相机个数
+                        N_xyz = prob.shape[0]   # 当前相机 3D点的个数 = H * W
+                        num_sampled = int(N_xyz * factor)   # 当前相机 保留3D点的个数（均分） = 设定的要保留点的总数 / 相机个数
 
                         indices = np.random.choice(N_xyz, size=num_sampled, p=prob,replace=False)
                         

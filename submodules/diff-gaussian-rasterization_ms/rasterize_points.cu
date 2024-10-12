@@ -219,21 +219,19 @@ RasterizeGaussiansDepthCUDA(
       tan_fovx,
       tan_fovy,
       prefiltered,
-      out_color.contiguous().data<float>(),
-      out_pts.contiguous().data<float>(),
+      out_color.contiguous().data<float>(), // 输出的 RGB图
+      out_pts.contiguous().data<float>(),   // 输出的 深度点（射线 与 最大贡献度高斯的 交点中点）的 世界坐标
 
-      out_depth.contiguous().data<float>(),
-      accum_alpha.contiguous().data<float>(),  
-      gidx.contiguous().data<int>(),
-      discriminants.contiguous().data<float>(),  
+      out_depth.contiguous().data<float>(),     // 输出的 深度图（射线 与 最大贡献度高斯交点中点的 距离）
+      accum_alpha.contiguous().data<float>(),   // 输出的 累积的透射率
+      gidx.contiguous().data<int>(),    // 输出的 对每个像素 贡献度最大的高斯的ID
+      discriminants.contiguous().data<float>(),  // 输出的 每个像素光线 与 最大贡献度高斯 是否有交点的判定值
 
       radii.contiguous().data<int>(),
       debug);
   }
 
-  return std::make_tuple(rendered, out_color, out_pts, out_depth, 
-  accum_alpha, gidx, discriminants, radii, geomBuffer, 
-  binningBuffer, imgBuffer);  
+  return std::make_tuple(rendered, out_color, out_pts, out_depth, accum_alpha, gidx, discriminants, radii, geomBuffer, binningBuffer, imgBuffer);
 }  
 
 

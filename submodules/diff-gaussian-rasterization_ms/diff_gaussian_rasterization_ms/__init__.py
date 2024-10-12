@@ -165,12 +165,12 @@ class _RasterizeGaussians(torch.autograd.Function):
         # Invoke C++/CUDA rasterizer
         num_rendered, color, out_pts, depth, accum_alpha, gidx, discriminants, radii, geomBuffer, binningBuffer, imgBuffer = _C.rasterize_gaussians_depth(*args)
 
-        res =  {"render": color,    # 渲染的RGB图
-                "out_pts": out_pts, # 渲染的深度图 对应的 世界坐标的点云
-                "rendered_depth": depth,    # 渲染的深度图
-                "discriminants": discriminants,
-                "gidx": gidx,
-                "accum_alpha": accum_alpha, # 累积的阿尔法权重
+        res =  {"render": color,    # 输出的 RGB图
+                "out_pts": out_pts, # 输出的 深度点（射线 与 最大贡献度高斯的 交点中点）的 世界坐标
+                "rendered_depth": depth,    # 输出的 深度图（射线 与 最大贡献度高斯交点中点的 距离）
+                "discriminants": discriminants, # 输出的 每个像素光线 与 最大贡献度高斯 是否有交点的判定值
+                "gidx": gidx,       # 输出的 对每个像素 贡献度最大的高斯的ID
+                "accum_alpha": accum_alpha,     # 输出的 累积的透射率
                 }
 
         return res

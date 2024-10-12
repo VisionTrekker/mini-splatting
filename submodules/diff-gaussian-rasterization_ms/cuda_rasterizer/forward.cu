@@ -426,12 +426,12 @@ render_depthCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 
-	float* __restrict__ out_color,  // 输出的 渲染的RGB图像
-	float* __restrict__ out_pts,    // 输出的
-	float* __restrict__ out_depth,  // 输出的
-	float* accum_alpha,         // 输出的
-	int* __restrict__ gidx,     // 输出的
-	float* __restrict__ discriminants,      // 输出的
+	float* __restrict__ out_color,  // 输出的 RGB图
+	float* __restrict__ out_pts,    // 输出的 深度点（射线 与 最大贡献度高斯的 交点中点）的 世界坐标
+	float* __restrict__ out_depth,  // 输出的 深度图（射线 与 最大贡献度高斯交点中点的 距离）
+	float* accum_alpha,         // 输出的 累积的透射率
+	int* __restrict__ gidx,     // 输出的 对每个像素 贡献度最大的高斯的ID
+	float* __restrict__ discriminants,      // 输出的 每个像素光线 与 最大贡献度高斯 是否有交点的判定值
 
 	const float* __restrict__ means3D,
 	const glm::vec3* __restrict__ scales,
@@ -474,9 +474,9 @@ render_depthCUDA(
 	float D = { 0 };
 	float sum_W = { 0 };
 
-	float weight_max=0;
-	float depth_max=0;
-	float discriminant_max=0;
+	float weight_max = 0;
+	float depth_max = 0;
+	float discriminant_max = 0;
 
 	int idx_max=0;
 	int flag_update=0;
@@ -485,30 +485,30 @@ render_depthCUDA(
     glm::mat4 matrix_temp = glm::inverse(matrix);
 	float *projmatrix_inv= glm::value_ptr(matrix_temp); // NDC2W
 
-	glm::vec3 ray_origin = *cam_pos;    // 当前相机中心的世界坐标
+    // 定义射线 r(t) = o + t * d
+	glm::vec3 ray_origin = *cam_pos;    // 射线的起点 o = 相机光心（世界坐标系下）
 	glm::vec3 point_rec = {0,0,0};
 
 
-
-
-    // 将当前处理的 像素 在像素平面的坐标 转换到 NDC空间
+    // 当前处理的 像素 在NDC空间中的 坐标：像素平面 ==> NDC空间
 	float3 p_proj_r = { Pix2ndc(pixf.x, W), Pix2ndc(pixf.y, H), 1};
 
-	//inverse process of 'Transform point by projecting'
+	// 将NDC坐标转换为齐次坐标 p_hom_r（增加微小偏移，以确保在后续计算中不会出现精度问题）
 	float p_hom_x_r = p_proj_r.x * (1.0000001);
 	float p_hom_y_r = p_proj_r.y * (1.0000001);
 	// self.zfar = 100.0, self.znear = 0.01
-	float p_hom_z_r = (100 + 0.01 - 1) / (100 - 0.01);
+	float p_hom_z_r = (100 + 0.01 - 1) / (100 - 0.01);  // 根据预定义的远近平面计算 齐次坐标的深度
 	float p_hom_w_r = 1;
+	float3 p_hom_r = {p_hom_x_r, p_hom_y_r, p_hom_z_r};
 
+	// 当前处理的 像素 在世界空间中的 坐标：NDC空间 ==> 世界空间
+	float4 p_orig_r = transformPoint4x4(p_hom_r, projmatrix_inv);
 
-	float3 p_hom_r={p_hom_x_r, p_hom_y_r, p_hom_z_r};
-	float4 p_orig_r=transformPoint4x4(p_hom_r, projmatrix_inv);
-
-	glm::vec3 ray_direction={
-		p_orig_r.x-ray_origin.x,
-		p_orig_r.y-ray_origin.y,
-		p_orig_r.z-ray_origin.z,
+    // 射线的方向向量 d，相机光心 -> 像素的方向（世界坐标系下）
+	glm::vec3 ray_direction = {
+		p_orig_r.x - ray_origin.x,
+		p_orig_r.y - ray_origin.y,
+		p_orig_r.z - ray_origin.z,
 	};
 	glm::vec3 normalized_ray_direction = glm::normalize(ray_direction);
 
@@ -563,92 +563,99 @@ render_depthCUDA(
 			for (int ch = 0; ch < CHANNELS; ch++)
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 				
-			// compute Gaussian depth
-			// Normalize quaternion to get valid rotation
+			// 计算当前处理的高斯的 深度，参考论文附录D
+
+			// 当前处理的高斯的 旋转四元数 转为 旋转矩阵
 			glm::vec4 q = rotations[collected_id[j]];// / glm::length(rot);
 			float rot_r = q.x;
 			float rot_x = q.y;
 			float rot_y = q.z;
 			float rot_z = q.w;
-
-
-			// Compute rotation matrix from quaternion
 			glm::mat3 R = glm::mat3(
 				1.f - 2.f * (rot_y * rot_y + rot_z * rot_z), 2.f * (rot_x * rot_y - rot_r * rot_z), 2.f * (rot_x * rot_z + rot_r * rot_y),
 				2.f * (rot_x * rot_y + rot_r * rot_z), 1.f - 2.f * (rot_x * rot_x + rot_z * rot_z), 2.f * (rot_y * rot_z - rot_r * rot_x),
 				2.f * (rot_x * rot_z - rot_r * rot_y), 2.f * (rot_y * rot_z + rot_r * rot_x), 1.f - 2.f * (rot_x * rot_x + rot_y * rot_y)
 			);
 
+            // 将 射线 转换到 高斯坐标系下
 
-			glm::vec3 temp={
-				ray_origin.x-means3D[3*collected_id[j]+0],
-				ray_origin.y-means3D[3*collected_id[j]+1],
-				ray_origin.z-means3D[3*collected_id[j]+2],
+            // 相机光心 相对于 高斯中心的 位置（世界坐标下）
+			glm::vec3 temp = {
+				ray_origin.x - means3D[3 * collected_id[j] + 0],
+				ray_origin.y - means3D[3 * collected_id[j] + 1],
+				ray_origin.z - means3D[3 * collected_id[j] + 2],
 			};
+			// 高斯坐标下的 相机光心 o
 			glm::vec3 rotated_ray_origin = R * temp;
+
+			// 高斯坐标系下的 射线方向向量 d
 			glm::vec3 rotated_ray_direction = R * normalized_ray_direction;
 
 
-			glm::vec3 a_t= rotated_ray_direction/(scales[collected_id[j]]*3.0f)*rotated_ray_direction/(scales[collected_id[j]]*3.0f);
+            // 计算一元二次方程的系数：a, b, c。论文附录公式(5)
+			glm::vec3 a_t = rotated_ray_direction / (scales[collected_id[j]] * 3.0f) * rotated_ray_direction / (scales[collected_id[j]] * 3.0f);
 			float a = a_t.x + a_t.y + a_t.z;
 
-			glm::vec3 b_t= rotated_ray_direction/(scales[collected_id[j]]*3.0f)*rotated_ray_origin/(scales[collected_id[j]]*3.0f);
-			float b = 2*(b_t.x + b_t.y + b_t.z);
+			glm::vec3 b_t = rotated_ray_direction / (scales[collected_id[j]] * 3.0f) * rotated_ray_origin / (scales[collected_id[j]] * 3.0f);
+			float b = 2 * (b_t.x + b_t.y + b_t.z);
 
-			glm::vec3 c_t= rotated_ray_origin/(scales[collected_id[j]]*3.0f)*rotated_ray_origin/(scales[collected_id[j]]*3.0f);
-			float c = c_t.x + c_t.y + c_t.z-1;
+			glm::vec3 c_t = rotated_ray_origin / (scales[collected_id[j]] * 3.0f) * rotated_ray_origin / (scales[collected_id[j]] * 3.0f);
+			float c = c_t.x + c_t.y + c_t.z - 1;
+
+            // 用于判断 射线与高斯椭球是否有交点
+			float discriminant = b * b - 4 * a * c;
 
 
-			float discriminant=b*b-4*a*c;	
+            // 相机光心 到 交点中点的 距离（世界坐标下）
+			float depth = (- b / 2 / a) / glm::length(ray_direction);   // t_mid = - b / (2a)，射线 与 当前高斯交点的 中点，基于椭球的单位尺寸而计算得到
+			                                                            // 因此 depth = t_mid = 相机光心 到 交点中点的 距离（高斯坐标下）
+			                                                            // glm::length(ray_direction)，相机光心到当前像素的真实物理距离（世界坐标下）。除以它是将该距离 转回世界坐标下的 真实长度
 
-
-			float depth = (-b/2/a)/glm::length(ray_direction);
-			
-
-			if(depth<0)
+			if(depth < 0)
 				continue;
 
-
-
-			if(weight_max<alpha * T)
+            // 找到对当前像素贡献度最大的高斯，记录其：权重值、深度、判别式、ID
+			if(weight_max < alpha * T)
 			{
-				weight_max=alpha * T;
-				depth_max=depth;
-				discriminant_max=discriminant;
-				idx_max=collected_id[j];
+				weight_max = alpha * T;     // 高斯的 权重 = 不透明度 * 透射率：对光线的吸收程度 * 光线经过之前的高斯后 剩余的能量
+				depth_max = depth;
+				discriminant_max = discriminant;
+				idx_max = collected_id[j];
 
-				point_rec = ray_origin+(-b/2/a)*normalized_ray_direction;			
+				point_rec = ray_origin + (- b / 2 / a ) * normalized_ray_direction;     // 交点中点的 坐标（世界坐标系下）。r(t_mid) = o + t_mid * d
 			}
 
-		
-			
+
 			T = test_T;
 			last_contributor = contributor;
-		}		
-			
+		}
 
 	}
+	// 渲染完当前像素
 
 
-	D=depth_max;
-
+	D = depth_max;  // 当前像素的深度 = 射线 与 最大贡献度高斯交点中点的 距离
 
 
 	// All threads that treat valid pixel write out their final
 	// rendering data to the frame and auxiliary buffers.
 	if (inside)
 	{
-		final_T[pix_id] = T;
-		n_contrib[pix_id] = last_contributor;
+		final_T[pix_id] = T;        // 输出的 渲染像素pix_id的颜色过程中 累积的透射率
+		n_contrib[pix_id] = last_contributor;   // 输出的 渲染像素pix_id的颜色过程中 穿过的高斯的个数，也是对渲染当前像素RGB值 最后一个有贡献的高斯ID
+
+		// 输出的 RGB图 加上 背景颜色
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
+
+		// 输出的 深度点（射线 与 最大贡献度高斯的 交点中点）的 世界坐标
 		for (int ch = 0; ch < 3; ch++)
 			out_pts[ch * H * W + pix_id] = point_rec[ch];
 
-		out_depth[pix_id] = D;
-		accum_alpha[pix_id] = T;
-		discriminants[pix_id] = discriminant_max;
-		gidx[pix_id]=idx_max;
+		out_depth[pix_id] = D;      // 输出的 深度图（射线 与 最大贡献度高斯交点中点的 距离）
+		accum_alpha[pix_id] = T;    // 输出的 累积后的透射率
+		discriminants[pix_id] = discriminant_max;   // 输出的 每个像素光线 与 最大贡献度高斯 是否有交点的判定值
+		gidx[pix_id] = idx_max;       // 输出的 对每个像素 贡献度最大的高斯的ID
 
 
 	}

@@ -369,13 +369,13 @@ int CudaRasterizer::Rasterizer::forward_depth(
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
 	const bool prefiltered,
-	float* out_color,
-	float* out_pts,
+	float* out_color,   // 输出的 RGB图
+	float* out_pts,     // 输出的 深度点（射线 与 最大贡献度高斯的 交点中点）的 世界坐标
 
-	float* out_depth,
-	float* accum_alpha,
-	int* gidx,
-	float* discriminants,
+	float* out_depth,   // 输出的 深度图（射线 与 最大贡献度高斯交点中点的 距离）
+	float* accum_alpha,     // 输出的 累积的透射率
+	int* gidx,          // 输出的 对每个像素 贡献度最大的高斯的ID
+	float* discriminants,   // 输出的 每个像素光线 与 最大贡献度高斯 是否有交点的判定值
 
 	int* radii,
 	bool debug)
@@ -496,13 +496,13 @@ int CudaRasterizer::Rasterizer::forward_depth(
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		background,
-		out_color,
-		out_pts,
+		out_color,      // 输出的 RGB图
+		out_pts,        // 输出的 深度点（射线 与 最大贡献度高斯的 交点中点）的 世界坐标
 		
-		out_depth,
-		accum_alpha,
-		gidx,
-		discriminants,
+		out_depth,      // 输出的 深度图（射线 与 最大贡献度高斯交点中点的 距离）
+		accum_alpha,    // 输出的 累积的透射率
+		gidx,       // 输出的 对每个像素 贡献度最大的高斯的ID
+		discriminants,  // 输出的 每个像素光线 与 最大贡献度高斯 是否有交点的判定值
 
 		means3D,
 		(glm::vec3*)scales,
