@@ -108,7 +108,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+                progress_bar.set_postfix({
+                    "Loss": f"{ema_loss_for_log:.{7}f}",
+                    "Points": f"{len(gaussians.get_xyz)}"
+                     })
                 progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()
@@ -119,8 +122,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
 
-
-
             # Densification
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
@@ -130,7 +131,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 area_max = render_pkg["area_max"]
                 mask_blur = torch.logical_or(mask_blur, area_max>(image.shape[1]*image.shape[2]/5000))
 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and iteration % 5000!=0:  
+                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and iteration % 5000!=0 and gaussians._xyz.shape[0] < args.num_max:
                 
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
 
@@ -315,7 +316,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
 
-    parser.add_argument("--num_depth", type=int, default=3_500_000)
+    parser.add_argument("--num_depth", type=int, default=1_000_000)
+    parser.add_argument("--num_max", type=int, default=1_850_000)
 
 
     args = parser.parse_args(sys.argv[1:])

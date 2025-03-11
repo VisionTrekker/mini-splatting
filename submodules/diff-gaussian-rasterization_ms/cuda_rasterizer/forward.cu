@@ -271,9 +271,9 @@ renderCUDA(
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
 
-	float* __restrict__ accum_weights_p,
-	int* __restrict__ accum_weights_count,
-	float* __restrict__ accum_max_count,
+	float* __restrict__ accum_weights_p,    // 输出的
+	int* __restrict__ accum_weights_count,  // 输出的
+	float* __restrict__ accum_max_count,    // 输出的
 
 	const float4* __restrict__ conic_opacity,
 	float* __restrict__ final_T,
@@ -292,7 +292,7 @@ renderCUDA(
 	float2 pixf = { (float)pix.x, (float)pix.y };
 
 	// Check if this thread is associated with a valid pixel or outside.
-	bool inside = pix.x < W&& pix.y < H;
+	bool inside = pix.x < W && pix.y < H;
 	// Done threads can help with fetching, but don't rasterize
 	bool done = !inside;
 
@@ -311,14 +311,15 @@ renderCUDA(
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
-	float D = { 0 };
-	float sum_W = { 0 };
 
-	float weight_max=0;
-	float depth_max=0;
+	float D = { 0 };        //
+	float sum_W = { 0 };    //
 
-	int idx_max=0;
-	int flag_update=0;
+	float weight_max = 0;   //
+	float depth_max = 0;    //
+
+	int idx_max = 0;        //
+	int flag_update = 0;    //
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -374,10 +375,11 @@ renderCUDA(
 			for (int ch = 0; ch < CHANNELS; ch++)
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 
-			if(weight_max<alpha * T)
+            // 记录对渲染当前像素贡献度最大的高斯，更新：最大贡献度、其深度、其深度判别式、其ID
+			if(weight_max < alpha * T)
 			{
-				weight_max=alpha * T;
-				idx_max = collected_id[j];
+				weight_max = alpha * T;     // 最大贡献度
+				idx_max = collected_id[j];  //
 				flag_update = 1;
 			}
 
@@ -614,10 +616,10 @@ render_depthCUDA(
 			if(depth < 0)
 				continue;
 
-            // 找到对当前像素贡献度最大的高斯，记录其：权重值、深度、判别式、ID
+            // 记录对渲染当前像素贡献度最大的高斯，更新：最大贡献度、其深度、其深度判别式、其ID
 			if(weight_max < alpha * T)
 			{
-				weight_max = alpha * T;     // 当前高斯的 权重 = 当前高斯的不透明度 * 经之前高斯累积的透射率 = 当前高斯对光线的吸收程度 * 光线经过之前的高斯后 剩余的能量
+				weight_max = alpha * T;     // 当前高斯的 贡献度 = 经之前高斯累积的透射率T（光线经过之前的高斯后 剩余的能量） * 当前高斯的alpha （当前高斯对光线的吸收程度）
 				depth_max = depth;
 				discriminant_max = discriminant;
 				idx_max = collected_id[j];

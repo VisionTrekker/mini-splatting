@@ -168,7 +168,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     mask_blur = torch.zeros(gaussians._xyz.shape[0], device='cuda')
                     
                     
-                if iteration % 1000==0:
+                if iteration % 5000==0:
                     # 0 ~ 15K，每5000代，使用深度重新初始化高斯
 
                     out_pts_list=[] # 存储 采样后的3D点

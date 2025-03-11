@@ -335,9 +335,9 @@ int CudaRasterizer::Rasterizer::forward(
 		width, height,
 		geomState.means2D,
 		feature_ptr,
-		accum_weights_ptr,
-		accum_weights_count,
-		accum_max_count,
+		accum_weights_ptr,  // 输出的
+		accum_weights_count,    // 输出的
+		accum_max_count,    // 输出的
 		geomState.conic_opacity,
 		imgState.accum_alpha,
 		imgState.n_contrib,
